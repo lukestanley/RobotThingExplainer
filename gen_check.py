@@ -3,45 +3,9 @@ import string
 from pprint import pprint
 import anthropic
 
-def extract_allowed_words(csv_path, category='A1'):
-    allowed_words = set()
-    with open(csv_path, newline='', encoding='utf-8') as csvfile:
-        reader = csv.DictReader(csvfile)
-        for row in reader:
-            if row['Category'] == category:
-                allowed_words.add(row['Word'].lower())  # Normalise to lowercase
-    return sorted(allowed_words)
+from words import find_invalid_words, allowed_words_list
 
-def find_invalid_words(text, valid_words, extra_words=[]):
-    words = text.lower().split()
-    invalid_words = set()
-
-    # Create a translation table to remove punctuation
-    translator = str.maketrans('', '', string.punctuation)
-
-    def singularise(word):
-        """Convert simple plural forms or conjugations to singular."""
-        if word.endswith('es') and len(word) > 2:
-            base_word = word[:-2]
-            if base_word in valid_words or base_word in extra_words:
-                return base_word
-        if word.endswith('s') and len(word) > 1:
-            base_word = word[:-1]
-            if base_word in valid_words or base_word in extra_words:
-                return base_word
-        return word
-
-    # Create a copy of the valid words list and add extra words
-    combined_words = set(valid_words).union(extra_words)
-
-    for word in words:
-        cleaned_word = word.translate(translator)  # Remove punctuation
-        singular_word = singularise(cleaned_word)  # Convert to singular form
-        if singular_word not in combined_words:
-            invalid_words.add(cleaned_word)
-
-    return list(invalid_words)
-
+anthropic_client = anthropic.Anthropic()
 
 def generate_prompt(allowed_words, topic, prior_texts='', prior_invalid_words=''):
     allowed_word_list_string = ','.join(allowed_words)
@@ -79,9 +43,6 @@ explanation_schema = {
 }
 
 
-allowed_words_list = extract_allowed_words('oxford_britishish_3000_full_words_types_categories.csv')
-
-anthropic_client = anthropic.Anthropic()
 
 
 def make_explanation(topic, allowed_words_list=allowed_words_list, max_attempts=5):
@@ -121,6 +82,7 @@ def make_explanation(topic, allowed_words_list=allowed_words_list, max_attempts=
 
         # Get the response as a dictionary
         response = message.to_dict()
+        pprint(response)
         if len(response['content']) == 1:
             output_data = response['content'][0]['input']
             planning = output_data.get('planning', 'No separate planning provided')
@@ -133,7 +95,8 @@ def make_explanation(topic, allowed_words_list=allowed_words_list, max_attempts=
         # Validate the output
         extra_terms = topic.split(' ')
         invalid_words = find_invalid_words(output, allowed_words_list, extra_terms)
-
+        
+        
         # Log the message history
         message_history.append({
             "attempt": attempts + 1,
@@ -141,10 +104,10 @@ def make_explanation(topic, allowed_words_list=allowed_words_list, max_attempts=
             "output": output,
             "invalid_words": invalid_words
         })
-        pprint(message_history[-1])
 
         if not invalid_words:
             return output  # Return explanation if valid
+        print("Invalid words: ", invalid_words)
 
         attempts += 1
 
