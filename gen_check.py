@@ -1,7 +1,7 @@
 from pprint import pprint
 import traceback
 import anthropic
-from generation_schema_and_prompts import explanation_schema, explanation_tool, explanation_system_prompt, generate_explanation_prompt, validate_explanation_output, extract_explanation_text
+from generation_schema_and_prompts import explanation_schema, explanation_tool, explanation_system_prompt, generate_explanation_prompt, validate_explanation_output, extract_explanation_text, critique_system_prompt, generate_critique_prompt, extract_critique_score
 
 # Definitions for interaction with a Large Language Model
 anthropic_client = anthropic.Anthropic()
@@ -51,9 +51,34 @@ def make_explanation(topic) -> str:
             print(traceback.format_exc())
     raise Exception(f"Unable to generate a valid explanation for {context['topic']} after 5 attempts.")
 
+def score_explanation(explanation, topic):
+    context = {
+        "topic": topic,
+        "explanation": explanation,
+        "attempts": 0
+    }
+    while context["attempts"] < 5:
+        try:
+            user_prompt = generate_critique_prompt(context)
+            system_prompt_text = critique_system_prompt()
+            return llm_manager(
+                user_prompt=user_prompt,
+                system_prompt=system_prompt_text,
+                tools=[],
+                extract_data=extract_critique_score,
+                validate_output=lambda x, _: x,  # No validation needed
+                context=context
+            )
+        except Exception as e:
+            print('context')
+            pprint(context)
+            print(traceback.format_exc())
+    raise Exception(f"Unable to score the explanation for {context['topic']} after 5 attempts.")
 
 # Example usage
 
 explanation = make_explanation("global warming")
 print("\nFinal explanation:", explanation)
 
+score = score_explanation(explanation, "global warming")
+print(f"\nScore for the explanation: {score}")

@@ -79,3 +79,33 @@ def extract_explanation_text(response, context):
     except Exception as e:
         print("Error extracting data: %s", traceback.format_exc())
         raise
+
+def critique_system_prompt():
+    return """You are an expert in evaluating explanations for clarity, simplicity, and effectiveness in conveying the core concepts to a general audience. Your task is to provide a numerical score between 1 and 5 for the given explanation, where:
+
+1 - Poor explanation, fails to convey the core concepts, confusing or inaccurate
+2 - Below average explanation, misses key points or lacks clarity
+3 - Average explanation, covers the basics but could be improved
+4 - Good explanation, clear and effective in conveying the main ideas
+5 - Excellent explanation, highly effective in conveying the core concepts in a simple and engaging way
+
+Please provide only the numerical score, without any additional text or explanation."""
+
+def generate_critique_prompt(context):
+    return f"""Score the following explanation for the topic "{context['topic']}" on a scale of 1 to 5:
+
+`{context['explanation']}`
+Please note that the explanation had to use only 2 sentences and words from a very restricted allowed list, bare this in mind when scoring.
+
+"""
+
+def extract_critique_score(response, context):
+    try:
+        score_str = response['content'][0]['text']
+        score = int(score_str)
+        if score < 1 or score > 5:
+            raise ValueError(f"Invalid score: {score_str}")
+        return score
+    except Exception as e:
+        print("Error extracting score: %s", traceback.format_exc())
+        raise
