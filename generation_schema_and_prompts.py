@@ -1,26 +1,29 @@
 import traceback
+from pprint import pprint
+from pydantic import BaseModel, Field
+
 from words import find_invalid_words, allowed_words_list
+from utils import get_tool_response_object_from_messages
 
-explanation_schema = {
-    "type": "object",
-    "properties": {
-        "planning": {
-            "type": "string",
-            "description": "Detailed planning of the explanation in a step-by-step manner. Share reflections on how to use the restricted word list to explain the topic. E.g: consider which words to use, how to structure the explanation, etc."
-        },
-        "output": {
-            "type": "string",
-            "description": "Final explanation, adhering to the vocabulary list."
-        }
-    },
-    "required": ["planning", "output"]
-}
 
+class ExplanationSchema(BaseModel):
+    planning: str = Field(..., description="Detailed planning of the explanation in a step-by-step manner. Share reflections on how to use the restricted word list to explain the topic. E.g: consider which words to use, how to structure the explanation, etc.")
+    output: str = Field(..., description="Final explanation, adhering to the vocabulary list.")
+
+class CritiqueSchema(BaseModel):
+    review: str = Field(..., description="Reflect on the clarity and effectiveness of the explanation. Is the grammar using good English? Think step by step sharing detailed evaluation.")
+    score: int = Field(..., description="A score between 1 and 5 evaluating the clarity and effectiveness of the explanation.")
 
 explanation_tool = {
     "name": "explanation_schema",
     "description": "Show working out with a step-by-step plan for how to use the restricted word list to explain the topic.",
-    "input_schema": explanation_schema,
+    "parameters": ExplanationSchema.schema(),
+}
+
+critique_tool = {
+    "name": "critique_schema",
+    "description": "Review the given explanation.",
+    "parameters": CritiqueSchema.schema(),
 }
 
 def explanation_system_prompt():
@@ -66,11 +69,15 @@ def validate_explanation_output(output, context):
         raise ValueError(f"Invalid words found: {', '.join(invalid_words)}")
     return output
 
+
 def extract_explanation_text(response, context):
     try:
-        # Attempt to directly fetch the output text from the response
-        output = next((data['input'] for data in response['content'] if 'input' in data), None)['output']
-        print ('output:','\n',output)
+        #print ('response:',response)
+        output = None
+        output_object = get_tool_response_object_from_messages(response)
+        assert 'output' in output_object
+        assert 'planning' in output_object
+        output = output_object['output']
         if output is None or not isinstance(output, str):
             print("Failed to extract valid output from response: %s", response)
             raise ValueError("Extracted data is invalid or not in the expected format.")
@@ -81,31 +88,52 @@ def extract_explanation_text(response, context):
         raise
 
 def critique_system_prompt():
-    return """You are an expert in evaluating explanations for clarity, simplicity, and effectiveness in conveying the core concepts to a general audience. Your task is to provide a numerical score between 1 and 5 for the given explanation, where:
+    return """You are an expert in evaluating explanations for clarity, simplicity, and effectiveness in conveying the core concepts to a general audience and children.
+Your task is to write a critical review and provide a numerical score between 1 and 5 for the given explanation using the critique_schema tool output format, where:
 
 1 - Poor explanation, fails to convey the core concepts, confusing or inaccurate
 2 - Below average explanation, misses key points or lacks clarity
 3 - Average explanation, covers the basics but could be improved
 4 - Good explanation, clear and effective in conveying the main ideas
-5 - Excellent explanation, highly effective in conveying the core concepts in a simple and engaging way
+5 - Excellent explanation, highly effective in conveying the core concepts in a simple and engaging way.
 
-Please provide only the numerical score, without any additional text or explanation."""
+We need the written review to carefully consider the quality of the grammar too.
+For example, should plural versions of the words have been used instead? Are there high frequency words that that are missing that would improve the grammar or make it easier to understand while being within the rules?
+"""
 
 def generate_critique_prompt(context):
-    return f"""Score the following explanation for the topic "{context['topic']}" on a scale of 1 to 5:
+    return f"""Score the following explanation for the topic "{context['topic']}" on a scale of 1 to 5 using the critique_schema tool output format:
 
 `{context['explanation']}`
-Please note that the explanation had to use only 2 sentences and words from a very restricted allowed list, bare this in mind when scoring.
 
+Please note that the explanation had to use ONLY 2 sentences and words from a very restricted allowed list, of about ~700 of the most frequent English words only! 
+Here is the list used: `{','.join(allowed_words_list)}`.
+
+Bare in mind the rules the author had to comply with when reviewing it and scoring, especially when making suggestions for improvement.
 """
+
+def validate_critique_output(output, context):
+    """ Default validation function to check if the output is a valid integer score. """
+    try:
+        score = output["score"]
+        if score < 1 or score > 5:
+            raise ValueError(f"Invalid score: {score}")
+        return output
+    except Exception as e:
+        print("Error validating critique output: %s", traceback.format_exc())
+        raise
+
 
 def extract_critique_score(response, context):
     try:
-        score_str = response['content'][0]['text']
-        score = int(score_str)
-        if score < 1 or score > 5:
-            raise ValueError(f"Invalid score: {score_str}")
-        return score
+        output = None
+        output = get_tool_response_object_from_messages(response)
+        assert 'score' in output
+
+        if output is None or not isinstance(output, dict):
+            print("Failed to extract valid output from response: %s", response)
+            raise ValueError("Extracted data is invalid or not in the expected format.")
+        return output
     except Exception as e:
         print("Error extracting score: %s", traceback.format_exc())
         raise
